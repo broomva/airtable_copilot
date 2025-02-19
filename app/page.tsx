@@ -25,7 +25,7 @@ function YourMainContent() {
   // Render a greeting in the chat
   useCopilotAction({
     name: "greetUser",
-    available: "remote", // make this available only to the agent
+    // available: "remote", // make this available only to the agent
     parameters: [
       {
         name: "name",
@@ -44,7 +44,7 @@ function YourMainContent() {
   // Action for setting the background color
   useCopilotAction({
     name: "setBackgroundColor",
-    available: "remote", // make this available only to the agent
+    // available: "remote", // make this available only to the agent
     parameters: [
       {
         name: "backgroundColor",

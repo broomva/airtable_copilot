@@ -19,7 +19,8 @@ import {
   entrypoint,
   addMessages,
   MemorySaver,
-  getPreviousState
+  getPreviousState,
+  LangGraphRunnableConfig
 } from "@langchain/langgraph";
 import { v4 as uuidv4 } from "uuid";
 
@@ -48,19 +49,36 @@ const getWeather = tool(async ({ location }: { location: string }) => {
   description: "Call to get the weather from a specific location."
 });
 
-const tools = [getWeather];
-const toolsByName = Object.fromEntries(tools.map((tool) => [tool.name, tool]));
+// Define base tools (these will be combined with Copilot actions)
+const baseTools = [getWeather];
+
+// Define tool types
+type ToolType = typeof getWeather;
+interface ToolsByName {
+  [key: string]: ToolType;
+}
+
+type ConfigurableType = {
+  thread_id?: string;
+  toolsByName?: ToolsByName;
+};
 
 // Define tasks
-const callModel = task("callModel", async (messages: BaseMessageLike[]) => {
+const callModel = task("callModel", async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
+  const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
+  const tools = Object.values(toolsByName);
   const response = await model.bindTools(tools).invoke(messages);
   return response;
 });
 
 const callTool = task(
   "callTool",
-  async (toolCall: ToolCall): Promise<ToolMessage> => {
+  async (toolCall: ToolCall, config: LangGraphRunnableConfig<ConfigurableType>): Promise<ToolMessage> => {
+    const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
     const tool = toolsByName[toolCall.name];
+    if (!tool) {
+      throw new Error(`Tool ${toolCall.name} not found`);
+    }
     const observation = await tool.invoke(toolCall.args as { location: string });
     return new ToolMessage({ 
       content: observation, 
@@ -76,28 +94,38 @@ const checkpointer = new MemorySaver();
 const agent = entrypoint({
   name: "agent",
   checkpointer,
-}, async (messages: BaseMessageLike[]) => {
+}, async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
   const previous = getPreviousState<BaseMessage[]>() ?? [];
   let currentMessages = addMessages(previous, messages);
-  let llmResponse = await callModel(currentMessages);
+  
+  // Get tools from toolsByName or use base tools
+  const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
+  const availableTools = Object.values(toolsByName);
+  
+  // Bind the tools to the model
+  const boundModel = model.bindTools(availableTools);
+  let llmResponse = await boundModel.invoke(currentMessages);
   
   while (true) {
     if (!llmResponse.tool_calls?.length) {
       break;
     }
 
-    // Execute tools
     const toolResults = await Promise.all(
       llmResponse.tool_calls.map((toolCall: ToolCall) => {
-        return callTool(toolCall);
+        const tool = toolsByName[toolCall.name];
+        if (!tool) {
+          throw new Error(`Tool ${toolCall.name} not found`);
+        }
+        return callTool(toolCall, { configurable: { toolsByName } });
       })
     );
 
     // Append to message list
     currentMessages = addMessages(currentMessages, [llmResponse, ...toolResults]);
 
-    // Call model again
-    llmResponse = await callModel(currentMessages);
+    // Call model again with bound tools
+    llmResponse = await boundModel.invoke(currentMessages);
   }
 
   // Append final response for storage
@@ -111,23 +139,18 @@ const agent = entrypoint({
 
 // Create the LangChain adapter with the agent
 const serviceAdapter = new LangChainAdapter({
-  chainFn: async ({ messages }, req?: NextRequest) => {
-    // Get thread ID from cookie or generate new one
-    let threadId = req?.cookies.get("copilot_thread_id")?.value;
-    
-    if (!threadId) {
-      threadId = uuidv4();
-      // Create response to set cookie
-      const response = NextResponse.next();
-      response.cookies.set("copilot_thread_id", threadId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-        maxAge: 60 * 60 * 24 * 7, // 1 week
-      });
-    }
+  chainFn: async ({ messages, tools: copilotTools, threadId: threadId }, req?: NextRequest) => {
+    // Combine base tools with Copilot action tools and create tools map
+    const allTools = [...baseTools, ...(copilotTools || [])] as ToolType[];
+    const toolsByName = Object.fromEntries(allTools.map((tool) => [tool.name, tool])) as ToolsByName;
 
-    const config = { configurable: { thread_id: threadId } };
+    const config: LangGraphRunnableConfig<ConfigurableType> = { 
+      configurable: { 
+        thread_id: threadId,
+        toolsByName,
+      }
+    };
+
     const result = await agent.invoke(messages, config);
     return new AIMessage({ content: result.content });
   },
