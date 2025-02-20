@@ -1236,8 +1236,27 @@ export default function DashboardPage() {
                       </thead>
                       <tbody>
                         {paginatedData.map((record) => (
-                          <tr key={record.id} className="border-b hover:bg-gray-50">
-                            <td className="px-4 py-2">
+                          <tr 
+                            key={record.id} 
+                            className={`border-b hover:bg-gray-50 cursor-pointer transition-colors ${
+                              selectedRecords.includes(record.id) ? 'bg-blue-50' : ''
+                            }`}
+                            onClick={(e) => {
+                              // Don't trigger row selection when clicking edit button or input
+                              if (
+                                e.target instanceof HTMLElement && 
+                                (e.target.closest('button') || e.target.closest('input'))
+                              ) {
+                                return;
+                              }
+                              setSelectedRecords(current => 
+                                current.includes(record.id)
+                                  ? current.filter(id => id !== record.id)
+                                  : [...current, record.id]
+                              );
+                            }}
+                          >
+                            <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
                               <input
                                 type="checkbox"
                                 checked={selectedRecords.includes(record.id)}
@@ -1255,7 +1274,7 @@ export default function DashboardPage() {
                               <td key={field.id} className="px-4 py-2">
                                 {editingCell?.recordId === record.id && 
                                  editingCell?.fieldName === field.name ? (
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
                                     <Input
                                       value={editingCell.value}
                                       onChange={(e) => setEditingCell({
@@ -1291,11 +1310,14 @@ export default function DashboardPage() {
                                       size="sm"
                                       variant="ghost"
                                       className="opacity-0 group-hover:opacity-100 transition-opacity"
-                                      onClick={() => handleStartEdit(
-                                        record.id,
-                                        field.name,
-                                        record.fields[field.name]
-                                      )}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleStartEdit(
+                                          record.id,
+                                          field.name,
+                                          record.fields[field.name]
+                                        );
+                                      }}
                                     >
                                       <Pencil className="h-4 w-4" />
                                     </Button>
