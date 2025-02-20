@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@copilotkit/react-core": "1.5.20",
+    "@copilotkit/react-textarea": "^1.5.20",
     "@copilotkit/react-ui": "1.5.20",
     "@copilotkit/runtime": "1.5.20",
     "@copilotkit/runtime-client-gql": "1.5.20",

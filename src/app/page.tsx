@@ -3,286 +3,234 @@
 import { useCopilotAction, useCopilotReadable } from "@copilotkit/react-core";
 import { CopilotSidebar } from "@copilotkit/react-ui";
 import { useState } from "react";
-
-// Header Component
-function Header() {
-  return (
-    <header className="fixed top-0 left-0 right-0 z-40 bg-white shadow-sm">
-      <nav className="container mx-auto px-6 py-2">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center">
-            <span className="text-xl font-bold text-blue-600">LangGraph Agent</span>
-          </div>
-          <div className="hidden md:flex items-center space-x-6">
-            <a href="#features" className="text-gray-600 hover:text-blue-600 text-sm">Features</a>
-            <a href="#demo" className="text-gray-600 hover:text-blue-600 text-sm">Demo</a>
-            <a href="#pricing" className="text-gray-600 hover:text-blue-600 text-sm">Pricing</a>
-            <button className="bg-blue-600 text-white px-4 py-1.5 rounded-full hover:bg-blue-700 text-sm">
-              Get Started
-            </button>
-          </div>
-        </div>
-      </nav>
-    </header>
-  );
-}
-
-// Hero Section
-function Hero() {
-  return (
-    <section className="pt-32 pb-20 bg-gradient-to-r from-blue-50 to-indigo-50">
-      <div className="container mx-auto px-6">
-        <div className="flex flex-col md:flex-row items-center">
-          <div className="md:w-1/2 mb-12 md:mb-0">
-            <h1 className="text-5xl font-bold text-gray-900 mb-6">
-              Intelligent Agent for Your Web Apps
-            </h1>
-            <p className="text-xl text-gray-600 mb-8">
-              A powerful LangGraph-based agent that can read, understand, and interact with your web interface. Built with CopilotKit for seamless integration.
-            </p>
-            <button className="bg-blue-600 text-white px-8 py-3 rounded-full text-lg hover:bg-blue-700 mr-4">
-              Try Demo
-            </button>
-            <button className="border-2 border-blue-600 text-blue-600 px-8 py-3 rounded-full text-lg hover:bg-blue-50">
-              Documentation
-            </button>
-          </div>
-          <div className="md:w-1/2">
-            <img src="/hero-image.png" alt="Agent Demo" className="rounded-lg shadow-xl" />
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// Features Section
-function Features() {
-  const features = [
-    {
-      title: "Screen Understanding",
-      description: "Agent can read and understand content from your web interface",
-      icon: "🔍"
-    },
-    {
-      title: "Interactive Actions",
-      description: "Execute actions and modify UI elements in real-time",
-      icon: "⚡"
-    },
-    {
-      title: "Memory Persistence",
-      description: "Maintains context across conversations with thread management",
-      icon: "🧠"
-    },
-    {
-      title: "Tool Integration",
-      description: "Easily extend functionality with custom tools and actions",
-      icon: "🛠️"
-    }
-  ];
-
-  return (
-    <section id="features" className="py-20 bg-white">
-      <div className="container mx-auto px-6">
-        <h2 className="text-4xl font-bold text-center text-gray-900 mb-12">
-          Powerful Features
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-          {features.map((feature, index) => (
-            <div key={index} className="p-6 border rounded-lg hover:shadow-lg transition-shadow">
-              <div className="text-4xl mb-4">{feature.icon}</div>
-              <h3 className="text-xl font-semibold mb-2">{feature.title}</h3>
-              <p className="text-gray-600">{feature.description}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// Demo Section
-function Demo() {
-  const [backgroundColor, setBackgroundColor] = useState("#ffffff");
-
-  // Make the demo section readable by the agent
-  useCopilotReadable({
-    description: "Interactive demo section",
-    value: "This is the interactive demo section where users can test the agent's capabilities. You can help users interact with the demo by greeting them or changing the background color."
-  });
-
-  // Render a greeting in the chat
-  useCopilotAction({
-    name: "greetUser",
-    parameters: [
-      {
-        name: "name",
-        description: "The name of the user to greet.",
-      },
-    ],
-    render: ({ args }) => {
-      return (
-        <div className="text-lg font-bold bg-blue-500 text-white p-2 rounded-xl text-center">
-          Hello, {args.name}!
-        </div>
-      );
-    },
-  });
-
-  // Action for setting the background color
-  useCopilotAction({
-    name: "setBackgroundColor",
-    parameters: [
-      {
-        name: "backgroundColor",
-        description: "The background color to set. Make sure to pick nice colors.",
-      },
-    ],
-    handler({ backgroundColor }) {
-      setBackgroundColor(backgroundColor);
-    },
-  });
-
-  return (
-    <section id="demo" className="py-20" style={{ backgroundColor }}>
-      <div className="container mx-auto px-6">
-        <h2 className="text-4xl font-bold text-center text-gray-900 mb-12">
-          Try It Yourself
-        </h2>
-        <div className="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow-lg">
-          <p className="text-gray-600 mb-6 text-center">
-            Interact with the agent using the sidebar chat. Try asking it to:
-          </p>
-          <ul className="list-disc pl-6 space-y-2 text-gray-600 mb-6">
-            <li>Greet you by name</li>
-            <li>Change the background color</li>
-            <li>Ask about the features</li>
-            <li>Get information about the demo</li>
-          </ul>
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <code className="text-sm">
-              Example: "Can you greet me? My name is John"
-            </code>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// Pricing Section
-function Pricing() {
-  const plans = [
-    {
-      name: "Starter",
-      price: "Free",
-      features: ["Basic agent functionality", "3 custom actions", "Community support"],
-    },
-    {
-      name: "Pro",
-      price: "$49/mo",
-      features: ["Advanced agent capabilities", "Unlimited actions", "Priority support", "Custom tools"],
-    },
-    {
-      name: "Enterprise",
-      price: "Custom",
-      features: ["Custom deployment", "SLA guarantee", "Dedicated support", "Advanced security"],
-    },
-  ];
-
-  return (
-    <section id="pricing" className="py-20 bg-gray-50">
-      <div className="container mx-auto px-6">
-        <h2 className="text-4xl font-bold text-center text-gray-900 mb-12">
-          Simple Pricing
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {plans.map((plan, index) => (
-            <div key={index} className="bg-white p-8 rounded-lg shadow-lg">
-              <h3 className="text-2xl font-bold mb-4">{plan.name}</h3>
-              <div className="text-4xl font-bold mb-6">{plan.price}</div>
-              <ul className="space-y-3 mb-8">
-                {plan.features.map((feature, i) => (
-                  <li key={i} className="flex items-center">
-                    <span className="text-green-500 mr-2">✓</span>
-                    {feature}
-                  </li>
-                ))}
-              </ul>
-              <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
-                Get Started
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-// Footer Component
-function Footer() {
-  return (
-    <footer className="bg-gray-900 text-white py-12">
-      <div className="container mx-auto px-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          <div>
-            <h4 className="text-xl font-bold mb-4">LangGraph Agent</h4>
-            <p className="text-gray-400">
-              Building the future of interactive web agents.
-            </p>
-          </div>
-          <div>
-            <h4 className="text-xl font-bold mb-4">Links</h4>
-            <ul className="space-y-2">
-              <li><a href="#features" className="text-gray-400 hover:text-white">Features</a></li>
-              <li><a href="#demo" className="text-gray-400 hover:text-white">Demo</a></li>
-              <li><a href="#pricing" className="text-gray-400 hover:text-white">Pricing</a></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="text-xl font-bold mb-4">Resources</h4>
-            <ul className="space-y-2">
-              <li><a href="#" className="text-gray-400 hover:text-white">Documentation</a></li>
-              <li><a href="#" className="text-gray-400 hover:text-white">API Reference</a></li>
-              <li><a href="#" className="text-gray-400 hover:text-white">Blog</a></li>
-            </ul>
-          </div>
-          <div>
-            <h4 className="text-xl font-bold mb-4">Contact</h4>
-            <ul className="space-y-2">
-              <li><a href="#" className="text-gray-400 hover:text-white">GitHub</a></li>
-              <li><a href="#" className="text-gray-400 hover:text-white">Twitter</a></li>
-              <li><a href="#" className="text-gray-400 hover:text-white">Discord</a></li>
-            </ul>
-          </div>
-        </div>
-        <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-          <p>© 2024 LangGraph Agent. All rights reserved.</p>
-        </div>
-      </div>
-    </footer>
-  );
-}
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Github } from "lucide-react";
 
 export default function Home() {
   return (
-    <main className="min-h-screen">
-      <Header />
-      <Hero />
-      <Features />
-      <Demo />
-      <Pricing />
-      <Footer />
-      <div className="fixed top-0 right-0 z-50 pt-14">
-        <CopilotSidebar
-          defaultOpen={false}
-          labels={{
-            title: "AI Assistant",
-            initial: "Hi! I'm your AI assistant. I can help you explore the demo and interact with the page. Try asking me to greet you or change the background color!",
-          }}
-        />
-      </div>
+    <main className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b">
+        <div className="container flex h-16 items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-xl font-bold">LangGraph Agent</span>
+            <Badge variant="secondary">Beta</Badge>
+          </div>
+          <nav className="flex items-center gap-4">
+            <a href="#features" className="text-sm hover:underline">Features</a>
+            <a href="#demo" className="text-sm hover:underline">Demo</a>
+            <a href="#pricing" className="text-sm hover:underline">Pricing</a>
+            <Button variant="outline" size="sm">
+              <Github className="mr-2 h-4 w-4" />
+              GitHub
+            </Button>
+          </nav>
+        </div>
+      </header>
+
+      {/* Hero Section */}
+      <section className="container py-24 space-y-8">
+        <div className="flex flex-col items-center text-center space-y-4">
+          <h1 className="text-4xl font-bold tracking-tighter sm:text-5xl md:text-6xl">
+            Your AI Agent Template
+          </h1>
+          <p className="max-w-[700px] text-gray-500 md:text-xl/relaxed lg:text-base/relaxed xl:text-xl/relaxed">
+            A fully functional React agent using LangGraph with a modern UI powered by CopilotKit.
+            Build, customize, and deploy your AI assistant in minutes.
+          </p>
+          <div className="flex gap-4">
+            <Button size="lg">Get Started</Button>
+            <Button variant="outline" size="lg">Documentation</Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Features Section */}
+      <section id="features" className="container py-24 space-y-8">
+        <div className="text-center space-y-4">
+          <h2 className="text-3xl font-bold">Powerful Features</h2>
+          <p className="text-gray-500">Everything you need to build advanced AI agents</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <FeatureCard
+            title="LangGraph Integration"
+            description="Built-in support for LangGraph, enabling complex agent workflows and state management."
+          />
+          <FeatureCard
+            title="Screen Awareness"
+            description="Agent can read and understand screen content using useCopilotReadable."
+          />
+          <FeatureCard
+            title="Interactive Actions"
+            description="Take actions on the UI through useCopilotAction with full type safety."
+          />
+        </div>
+      </section>
+
+      {/* Demo Section */}
+      <section id="demo" className="container py-24 space-y-8 bg-slate-50 rounded-xl">
+        <div className="text-center space-y-4">
+          <h2 className="text-3xl font-bold">Try It Live</h2>
+          <p className="text-gray-500">Interact with our demo agent and see the capabilities</p>
+        </div>
+        <div className="flex justify-center">
+          <DemoContent />
+        </div>
+      </section>
+
+      {/* Pricing Section */}
+      <section id="pricing" className="container py-24 space-y-8">
+        <div className="text-center space-y-4">
+          <h2 className="text-3xl font-bold">Simple Pricing</h2>
+          <p className="text-gray-500">Start building for free, upgrade as you grow</p>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <PricingCard
+            title="Free"
+            price="$0"
+            description="Perfect for testing and small projects"
+            features={["Basic agent capabilities", "Community support", "Limited API calls"]}
+          />
+          <PricingCard
+            title="Pro"
+            price="$49"
+            description="For professional developers"
+            features={["Advanced agent features", "Priority support", "Unlimited API calls"]}
+            highlighted
+          />
+          <PricingCard
+            title="Enterprise"
+            price="Custom"
+            description="For large organizations"
+            features={["Custom integrations", "Dedicated support", "SLA guarantees"]}
+          />
+        </div>
+      </section>
+
+      {/* CTA Section */}
+      <section className="container py-24 space-y-8">
+        <div className="text-center space-y-4">
+          <h2 className="text-3xl font-bold">Ready to Get Started?</h2>
+          <p className="text-gray-500">Join developers building the future of AI agents</p>
+          <Button size="lg" className="mt-4">Start Building Now</Button>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="border-t">
+        <div className="container py-8 flex justify-between items-center">
+          <div className="text-sm text-gray-500">
+            © 2024 LangGraph Agent. All rights reserved.
+          </div>
+          <div className="flex gap-4">
+            <a href="#" className="text-sm text-gray-500 hover:underline">Terms</a>
+            <a href="#" className="text-sm text-gray-500 hover:underline">Privacy</a>
+            <a href="#" className="text-sm text-gray-500 hover:underline">Contact</a>
+          </div>
+        </div>
+      </footer>
+
+      <CopilotSidebar
+        defaultOpen={true}
+        labels={{
+          title: "AI Assistant",
+          initial: "Hi! I'm your AI assistant. I can help you explore the features and capabilities of this template.",
+        }}
+      />
     </main>
+  );
+}
+
+function FeatureCard({ title, description }: { title: string; description: string }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <CardDescription>{description}</CardDescription>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PricingCard({ 
+  title, 
+  price, 
+  description, 
+  features,
+  highlighted = false 
+}: { 
+  title: string;
+  price: string;
+  description: string;
+  features: string[];
+  highlighted?: boolean;
+}) {
+  return (
+    <Card className={highlighted ? "border-primary shadow-lg" : ""}>
+      <CardHeader>
+        <CardTitle>{title}</CardTitle>
+        <div className="text-3xl font-bold">{price}</div>
+        <CardDescription>{description}</CardDescription>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-2">
+          {features.map((feature, i) => (
+            <li key={i} className="flex items-center">
+              <svg
+                className="mr-2 h-4 w-4 text-primary"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+              {feature}
+            </li>
+          ))}
+        </ul>
+        <Button className="w-full mt-4" variant={highlighted ? "default" : "outline"}>
+          Get Started
+        </Button>
+      </CardContent>
+    </Card>
+  );
+}
+
+function DemoContent() {
+  const [backgroundColor, setBackgroundColor] = useState("#ADD8E6");
+
+
+  return (
+    <div
+      style={{ backgroundColor }}
+      className="w-full max-w-2xl p-8 rounded-xl transition-colors"
+    >
+      <div className="bg-white p-6 rounded-lg shadow-lg">
+        <h3 className="text-xl font-semibold mb-4">Interactive Demo</h3>
+        <p className="text-gray-600 mb-4">
+          Try asking the AI assistant to:
+        </p>
+        <ul className="list-disc list-inside space-y-2 text-gray-600">
+          <li>Change the background color</li>
+          <li>Explain how the agent works</li>
+          <li>Show available actions</li>
+        </ul>
+      </div>
+    </div>
   );
 }
