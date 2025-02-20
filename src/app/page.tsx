@@ -28,6 +28,7 @@ export default function Home() {
             <a href="#features" className="text-sm hover:underline">Features</a>
             <a href="#demo" className="text-sm hover:underline">Demo</a>
             <a href="#pricing" className="text-sm hover:underline">Pricing</a>
+            <a href="/dashboard" className="text-sm hover:underline">Dashboard</a>
             <Button variant="outline" size="sm">
               <Github className="mr-2 h-4 w-4" />
               GitHub
@@ -49,6 +50,9 @@ export default function Home() {
           <div className="flex gap-4">
             <Button size="lg">Get Started</Button>
             <Button variant="outline" size="lg">Documentation</Button>
+            <Button variant="secondary" size="lg" asChild>
+              <a href="/dashboard">Try Airtable Demo →</a>
+            </Button>
           </div>
         </div>
       </section>

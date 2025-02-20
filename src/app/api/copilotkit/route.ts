@@ -64,12 +64,12 @@ type ConfigurableType = {
 };
 
 // Define tasks
-const callModel = task("callModel", async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
-  const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
-  const tools = Object.values(toolsByName);
-  const response = await model.bindTools(tools).invoke(messages);
-  return response;
-});
+// const callModel = task("callModel", async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
+//   const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
+//   const tools = Object.values(toolsByName);
+//   const response = await model.bindTools(tools).invoke(messages);
+//   return response;
+// });
 
 const callTool = task(
   "callTool",
