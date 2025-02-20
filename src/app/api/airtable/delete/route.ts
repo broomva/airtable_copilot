@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
 
     const results = await Promise.all(
       batches.map(async (batch) => {
-        const queryString = batch.map(id => `records[]=${id}`).join('&');
+        const queryString = batch.map((id: string) => `records[]=${id}`).join('&');
         const response = await fetch(
           `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}?${queryString}`,
           {

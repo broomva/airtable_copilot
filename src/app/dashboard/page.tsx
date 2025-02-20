@@ -26,7 +26,13 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+} from "@radix-ui/react-dropdown-menu";
 
 interface AirtableTable {
   id: string;
@@ -54,8 +60,17 @@ interface SortConfig {
   direction: 'asc' | 'desc';
 }
 
+interface FilterCondition {
+  field: string;
+  operator: 'equals' | 'contains' | 'greaterThan' | 'lessThan' | 'startsWith' | 'endsWith' | 'isEmpty' | 'isNotEmpty' | 'isNull' | 'isNotNull' | 'between' | 'in' | 'notIn';
+  value: string;
+  value2?: string; // For 'between' operator
+  values?: string[]; // For 'in' and 'notIn' operators
+}
+
 interface FilterConfig {
-  [key: string]: string;
+  conditions: FilterCondition[];
+  matchAll: boolean; // true for AND, false for OR
 }
 
 export default function DashboardPage() {
@@ -72,7 +87,10 @@ export default function DashboardPage() {
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
-  const [filters, setFilters] = useState<FilterConfig>({});
+  const [filters, setFilters] = useState<FilterConfig>({
+    conditions: [],
+    matchAll: true
+  });
   const [page, setPage] = useState(1);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const itemsPerPage = 10;
@@ -292,18 +310,124 @@ export default function DashboardPage() {
     }
   };
 
-  // Filter and sort data
+  // Enhanced filter handling
+  const handleAddFilter = (condition: FilterCondition) => {
+    setFilters(current => ({
+      ...current,
+      conditions: [...current.conditions, condition]
+    }));
+    setPage(1);
+  };
+
+  const handleRemoveFilter = (index: number) => {
+    setFilters(current => ({
+      ...current,
+      conditions: current.conditions.filter((_, i) => i !== index)
+    }));
+    setPage(1);
+  };
+
+  const handleClearFilters = () => {
+    setFilters({ conditions: [], matchAll: true });
+    setPage(1);
+  };
+
+  const handleToggleFilterMode = () => {
+    setFilters(current => ({
+      ...current,
+      matchAll: !current.matchAll
+    }));
+  };
+
+  // Expose filter actions to Copilot
+  useCopilotAction({
+    name: "addFilter",
+    description: "Add a filter condition to the table",
+    parameters: [
+      {
+        name: "field",
+        type: "string",
+        description: "The field name to filter on",
+      },
+      {
+        name: "operator",
+        type: "string",
+        description: "The filter operator (equals, contains, greaterThan, lessThan, startsWith, endsWith, isEmpty)",
+      },
+      {
+        name: "value",
+        type: "string",
+        description: "The value to filter by",
+      },
+    ],
+    handler: async ({ field, operator, value }) => {
+      if (!selectedTableFields.some(f => f.name === field)) {
+        throw new Error(`Field ${field} not found`);
+      }
+      handleAddFilter({ field, operator: operator as FilterCondition['operator'], value });
+    },
+  });
+
+  useCopilotAction({
+    name: "clearFilters",
+    description: "Clear all active filters",
+    handler: handleClearFilters,
+  });
+
+  useCopilotAction({
+    name: "toggleFilterMode",
+    description: "Toggle between AND/OR filter mode",
+    handler: handleToggleFilterMode,
+  });
+
+  // Enhanced filter logic in filteredAndSortedData
   const filteredAndSortedData = useMemo(() => {
     let result = [...tableData];
 
     // Apply filters
-    Object.entries(filters).forEach(([field, value]) => {
-      if (value) {
-        result = result.filter(record => 
-          record.fields[field]?.toString().toLowerCase().includes(value.toLowerCase())
-        );
-      }
-    });
+    if (filters.conditions.length > 0) {
+      result = result.filter(record => {
+        const conditionResults = filters.conditions.map(condition => {
+          const fieldValue = record.fields[condition.field]?.toString() ?? '';
+          
+          switch (condition.operator) {
+            case 'equals':
+              return fieldValue === condition.value;
+            case 'contains':
+              return fieldValue.toLowerCase().includes(condition.value.toLowerCase());
+            case 'greaterThan':
+              return Number(fieldValue) > Number(condition.value);
+            case 'lessThan':
+              return Number(fieldValue) < Number(condition.value);
+            case 'startsWith':
+              return fieldValue.toLowerCase().startsWith(condition.value.toLowerCase());
+            case 'endsWith':
+              return fieldValue.toLowerCase().endsWith(condition.value.toLowerCase());
+            case 'isEmpty':
+              return fieldValue === '';
+            case 'isNotEmpty':
+              return fieldValue !== '';
+            case 'isNull':
+              return fieldValue === null || fieldValue === undefined;
+            case 'isNotNull':
+              return fieldValue !== null && fieldValue !== undefined;
+            case 'between':
+              const num = Number(fieldValue);
+              return num >= Number(condition.value) && num <= Number(condition.value2 ?? condition.value);
+            case 'in':
+              return condition.values?.includes(fieldValue) ?? false;
+            case 'notIn':
+              return !(condition.values?.includes(fieldValue) ?? false);
+            default:
+              return false;
+          }
+        });
+
+        return filters.matchAll 
+          ? conditionResults.every(Boolean)  // AND
+          : conditionResults.some(Boolean);  // OR
+      });
+    }
 
     // Apply search
     if (searchTerm) {
@@ -382,6 +506,254 @@ export default function DashboardPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  // Expose Airtable configuration to the agent
+  useCopilotReadable({
+    description: "The current Airtable configuration, including API key status and selected base",
+    value: {
+      hasApiKey: Boolean(apiKey),
+      hasBaseId: Boolean(baseId),
+      selectedTable,
+      availableTables: tables.map(t => t.name),
+    },
+  });
+
+  // Expose table structure to the agent
+  useCopilotReadable({
+    description: "The structure of the currently selected table, including field definitions",
+    value: selectedTableFields.map(field => ({
+      name: field.name,
+      type: field.type,
+    })),
+  });
+
+  // Expose current table state to the agent
+  useCopilotReadable({
+    description: "The current state of the table data, including filtering, sorting, and pagination",
+    value: {
+      totalRecords: tableData.length,
+      currentPage: page,
+      totalPages,
+      itemsPerPage,
+      searchTerm,
+      sortConfig,
+      filters,
+      selectedRecords: selectedRecords.length,
+    },
+  });
+
+  // Expose current UI state
+  useCopilotReadable({
+    description: "The current UI state, including loading, editing, and error states",
+    value: {
+      isLoading: loading,
+      isSaving: saving,
+      currentError: error,
+      isEditing: Boolean(editingCell),
+      editingField: editingCell ? {
+        recordId: editingCell.recordId,
+        fieldName: editingCell.fieldName,
+      } : null,
+      showingCredentials: showCredentials,
+    },
+  });
+
+  // Update the Copilot readable state for filters
+  useCopilotReadable({
+    description: "The current filter configuration for the table",
+    value: {
+      activeFilters: filters.conditions.map(f => ({
+        field: f.field,
+        operator: f.operator,
+        value: f.value
+      })),
+      filterMode: filters.matchAll ? 'AND' : 'OR',
+      totalFilters: filters.conditions.length
+    }
+  });
+
+  // Update the dropdown menu UI to show advanced filter options
+  const renderFilterMenu = (field: { name: string; type: string }) => {
+    const activeFilters = filters.conditions.filter(f => f.field === field.name);
+    const fieldType = field.type.toLowerCase();
+    
+    const handleAddFilterWithValue = (operator: FilterCondition['operator']) => {
+      const filterInput = async () => {
+        let value = '';
+        let value2 = undefined;
+        let values = undefined;
+
+        if (operator === 'isNull' || operator === 'isNotNull' || 
+            operator === 'isEmpty' || operator === 'isNotEmpty') {
+          // These operators don't need values
+          handleAddFilter({ field: field.name, operator, value: '' });
+          return;
+        }
+
+        if (operator === 'between') {
+          const input1 = prompt('Enter minimum value:');
+          const input2 = prompt('Enter maximum value:');
+          if (input1 === null || input2 === null) return;
+          value = input1;
+          value2 = input2;
+        } else if (operator === 'in' || operator === 'notIn') {
+          const input = prompt('Enter values separated by commas:');
+          if (input === null) return;
+          values = input.split(',').map(v => v.trim());
+          value = input;
+        } else {
+          const input = prompt(`Enter value for ${operator}:`);
+          if (input === null) return;
+          value = input;
+        }
+
+        handleAddFilter({
+          field: field.name,
+          operator,
+          value,
+          value2,
+          values
+        });
+      };
+
+      filterInput();
+    };
+
+    return (
+      <DropdownMenuContent align="start" className="w-72 bg-white border rounded-md shadow-lg">
+        <div className="p-3 space-y-3">
+          <div className="flex items-center justify-between border-b pb-2">
+            <span className="text-sm font-semibold text-gray-700">Filters for {field.name}</span>
+            {activeFilters.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setFilters(current => ({
+                  ...current,
+                  conditions: current.conditions.filter(f => f.field !== field.name)
+                }))}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className="w-full flex items-center px-3 py-2 text-sm rounded hover:bg-gray-100">
+              <Filter className="h-4 w-4 mr-2" />
+              Add Filter
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent className="bg-white border rounded-md shadow-lg p-1">
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('equals')}>
+                Equals...
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('contains')}>
+                Contains...
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('startsWith')}>
+                Starts with...
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('endsWith')}>
+                Ends with...
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="my-1 border-gray-200" />
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('isNull')}>
+                Is Null
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('isNotNull')}>
+                Is Not Null
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('isEmpty')}>
+                Is Empty
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('isNotEmpty')}>
+                Is Not Empty
+              </DropdownMenuItem>
+              {fieldType === 'number' && (
+                <>
+                  <DropdownMenuSeparator className="my-1 border-gray-200" />
+                  <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                    onClick={() => handleAddFilterWithValue('greaterThan')}>
+                    Greater Than...
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                    onClick={() => handleAddFilterWithValue('lessThan')}>
+                    Less Than...
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                    onClick={() => handleAddFilterWithValue('between')}>
+                    Between...
+                  </DropdownMenuItem>
+                </>
+              )}
+              <DropdownMenuSeparator className="my-1 border-gray-200" />
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('in')}>
+                In List...
+              </DropdownMenuItem>
+              <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
+                onClick={() => handleAddFilterWithValue('notIn')}>
+                Not In List...
+              </DropdownMenuItem>
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+
+          {activeFilters.length > 0 && (
+            <>
+              <DropdownMenuSeparator className="border-gray-200" />
+              <div className="space-y-2">
+                <span className="text-sm text-gray-500 block px-3">Active Filters:</span>
+                {activeFilters.map((filter, index) => (
+                  <div key={index} className="flex items-center gap-2 bg-gray-50 p-2 rounded mx-2">
+                    <span className="text-sm text-gray-700 flex-1">
+                      {filter.operator === 'isNull' ? 'Is Null' :
+                       filter.operator === 'isNotNull' ? 'Is Not Null' :
+                       filter.operator === 'isEmpty' ? 'Is Empty' :
+                       filter.operator === 'isNotEmpty' ? 'Is Not Empty' :
+                       filter.operator === 'between' ? `Between ${filter.value} and ${filter.value2}` :
+                       filter.operator === 'in' ? `In [${filter.values?.join(', ')}]` :
+                       filter.operator === 'notIn' ? `Not In [${filter.values?.join(', ')}]` :
+                       `${filter.operator} ${filter.value}`}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveFilter(
+                        filters.conditions.findIndex(f => 
+                          f.field === field.name && 
+                          f.operator === filter.operator && 
+                          f.value === filter.value
+                        )
+                      )}
+                      className="text-gray-400 hover:text-gray-600"
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
+
+          <DropdownMenuSeparator className="border-gray-200" />
+          <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" onClick={() => handleSort(field.name)}>
+            Sort {sortConfig?.field === field.name && sortConfig.direction === 'asc' 
+              ? 'Descending' 
+              : 'Ascending'}
+          </DropdownMenuItem>
+        </div>
+      </DropdownMenuContent>
+    );
   };
 
   return (
@@ -579,21 +951,7 @@ export default function DashboardPage() {
                                       <ArrowUpDown className="ml-2 h-4 w-4" />
                                     </Button>
                                   </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="start">
-                                    <div className="p-2">
-                                      <Input
-                                        placeholder={`Filter ${field.name}...`}
-                                        value={filters[field.name] || ''}
-                                        onChange={(e) => handleFilter(field.name, e.target.value)}
-                                        className="mb-2"
-                                      />
-                                    </div>
-                                    <DropdownMenuItem onClick={() => handleSort(field.name)}>
-                                      Sort {sortConfig?.field === field.name && sortConfig.direction === 'asc' 
-                                        ? 'Descending' 
-                                        : 'Ascending'}
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
+                                  {renderFilterMenu(field)}
                                 </DropdownMenu>
                               </div>
                             </th>
