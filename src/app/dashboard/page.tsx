@@ -33,6 +33,15 @@ import {
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
 } from "@radix-ui/react-dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 
 interface AirtableTable {
   id: string;
@@ -73,6 +82,142 @@ interface FilterConfig {
   matchAll: boolean; // true for AND, false for OR
 }
 
+interface FilterModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onApply: (filter: FilterCondition) => void;
+  field: { name: string; type: string };
+  operator: FilterCondition['operator'];
+}
+
+function FilterModal({ isOpen, onClose, onApply, field, operator }: FilterModalProps) {
+  const [value, setValue] = useState('');
+  const [value2, setValue2] = useState('');
+  const [values, setValues] = useState<string[]>([]);
+
+  useEffect(() => {
+    // Reset values when modal opens
+    setValue('');
+    setValue2('');
+    setValues([]);
+  }, [isOpen]);
+
+  const handleApply = () => {
+    if (operator === 'isNull' || operator === 'isNotNull' || 
+        operator === 'isEmpty' || operator === 'isNotEmpty') {
+      onApply({ field: field.name, operator, value: '' });
+    } else if (operator === 'between') {
+      onApply({ field: field.name, operator, value, value2 });
+    } else if (operator === 'in' || operator === 'notIn') {
+      onApply({ field: field.name, operator, value: values.join(','), values });
+    } else {
+      onApply({ field: field.name, operator, value });
+    }
+    onClose();
+  };
+
+  const renderInputFields = () => {
+    switch (operator) {
+      case 'isNull':
+      case 'isNotNull':
+      case 'isEmpty':
+      case 'isNotEmpty':
+        return null;
+      case 'between':
+        return (
+          <div className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="min-value">Minimum value</Label>
+              <Input
+                id="min-value"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="Enter minimum value"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="max-value">Maximum value</Label>
+              <Input
+                id="max-value"
+                value={value2}
+                onChange={(e) => setValue2(e.target.value)}
+                placeholder="Enter maximum value"
+              />
+            </div>
+          </div>
+        );
+      case 'in':
+      case 'notIn':
+        return (
+          <div className="grid gap-2">
+            <Label htmlFor="values">Values (comma-separated)</Label>
+            <Input
+              id="values"
+              value={values.join(', ')}
+              onChange={(e) => setValues(e.target.value.split(',').map(v => v.trim()))}
+              placeholder="Enter values separated by commas"
+            />
+          </div>
+        );
+      default:
+        return (
+          <div className="grid gap-2">
+            <Label htmlFor="value">Value</Label>
+            <Input
+              id="value"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder={`Enter value for ${operator}`}
+            />
+          </div>
+        );
+    }
+  };
+
+  const getOperatorLabel = () => {
+    switch (operator) {
+      case 'equals': return 'Equals';
+      case 'contains': return 'Contains';
+      case 'startsWith': return 'Starts with';
+      case 'endsWith': return 'Ends with';
+      case 'greaterThan': return 'Greater than';
+      case 'lessThan': return 'Less than';
+      case 'between': return 'Between';
+      case 'in': return 'In list';
+      case 'notIn': return 'Not in list';
+      case 'isNull': return 'Is null';
+      case 'isNotNull': return 'Is not null';
+      case 'isEmpty': return 'Is empty';
+      case 'isNotEmpty': return 'Is not empty';
+      default: return operator;
+    }
+  };
+
+  return (
+    <Dialog open={isOpen} onOpenChange={onClose}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Add Filter: {field.name}</DialogTitle>
+          <DialogDescription>
+            {getOperatorLabel()} filter
+          </DialogDescription>
+        </DialogHeader>
+        <div className="grid gap-4 py-4">
+          {renderInputFields()}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={handleApply}>
+            Apply Filter
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseId, setBaseId] = useState("");
@@ -94,6 +239,15 @@ export default function DashboardPage() {
   const [page, setPage] = useState(1);
   const [selectedRecords, setSelectedRecords] = useState<string[]>([]);
   const itemsPerPage = 10;
+  const [filterModal, setFilterModal] = useState<{
+    isOpen: boolean;
+    field: { name: string; type: string } | null;
+    operator: FilterCondition['operator'] | null;
+  }>({
+    isOpen: false,
+    field: null,
+    operator: null,
+  });
 
   // Initialize state from localStorage
   useEffect(() => {
@@ -573,53 +727,60 @@ export default function DashboardPage() {
     }
   });
 
-  // Update the dropdown menu UI to show advanced filter options
+  // Add new hook to expose selected rows data
+  useCopilotReadable({
+    description: "The currently selected rows in the table (limited to 10 rows for context)",
+    value: {
+      totalSelected: selectedRecords.length,
+      selectedRows: selectedRecords.slice(0, 10).map(recordId => {
+        const record = tableData.find(r => r.id === recordId);
+        return record ? {
+          id: record.id,
+          fields: record.fields
+        } : null;
+      }).filter(Boolean),
+      hasMoreSelected: selectedRecords.length > 10,
+      message: selectedRecords.length > 10 
+        ? `Note: Only showing first 10 of ${selectedRecords.length} selected rows for context`
+        : undefined
+    }
+  });
+
+  // Add new hook to expose top 3 records
+  useCopilotReadable({
+    description: "The top 3 records from the current view (respecting filters, sorting, and search)",
+    value: {
+      totalRecords: filteredAndSortedData.length,
+      topRecords: filteredAndSortedData.slice(0, 3).map(record => ({
+        id: record.id,
+        fields: record.fields
+      })),
+      hasMoreRecords: filteredAndSortedData.length > 3,
+      appliedFilters: filters.conditions.length > 0,
+      searchApplied: Boolean(searchTerm),
+      sortApplied: Boolean(sortConfig)
+    }
+  });
+
+  const handleAddFilterWithValue = (field: { name: string; type: string }, operator: FilterCondition['operator']) => {
+    if (operator === 'isNull' || operator === 'isNotNull' || 
+        operator === 'isEmpty' || operator === 'isNotEmpty') {
+      handleAddFilter({ field: field.name, operator, value: '' });
+      return;
+    }
+
+    setFilterModal({
+      isOpen: true,
+      field,
+      operator,
+    });
+  };
+
+  // Update renderFilterMenu to use the new modal
   const renderFilterMenu = (field: { name: string; type: string }) => {
     const activeFilters = filters.conditions.filter(f => f.field === field.name);
     const fieldType = field.type.toLowerCase();
     
-    const handleAddFilterWithValue = (operator: FilterCondition['operator']) => {
-      const filterInput = async () => {
-        let value = '';
-        let value2 = undefined;
-        let values = undefined;
-
-        if (operator === 'isNull' || operator === 'isNotNull' || 
-            operator === 'isEmpty' || operator === 'isNotEmpty') {
-          // These operators don't need values
-          handleAddFilter({ field: field.name, operator, value: '' });
-          return;
-        }
-
-        if (operator === 'between') {
-          const input1 = prompt('Enter minimum value:');
-          const input2 = prompt('Enter maximum value:');
-          if (input1 === null || input2 === null) return;
-          value = input1;
-          value2 = input2;
-        } else if (operator === 'in' || operator === 'notIn') {
-          const input = prompt('Enter values separated by commas:');
-          if (input === null) return;
-          values = input.split(',').map(v => v.trim());
-          value = input;
-        } else {
-          const input = prompt(`Enter value for ${operator}:`);
-          if (input === null) return;
-          value = input;
-        }
-
-        handleAddFilter({
-          field: field.name,
-          operator,
-          value,
-          value2,
-          values
-        });
-      };
-
-      filterInput();
-    };
-
     return (
       <DropdownMenuContent align="start" className="w-72 bg-white border rounded-md shadow-lg">
         <div className="p-3 space-y-3">
@@ -647,62 +808,62 @@ export default function DashboardPage() {
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="bg-white border rounded-md shadow-lg p-1">
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('equals')}>
+                onClick={() => handleAddFilterWithValue(field, 'equals')}>
                 Equals...
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('contains')}>
+                onClick={() => handleAddFilterWithValue(field, 'contains')}>
                 Contains...
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('startsWith')}>
+                onClick={() => handleAddFilterWithValue(field, 'startsWith')}>
                 Starts with...
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('endsWith')}>
+                onClick={() => handleAddFilterWithValue(field, 'endsWith')}>
                 Ends with...
               </DropdownMenuItem>
               <DropdownMenuSeparator className="my-1 border-gray-200" />
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('isNull')}>
+                onClick={() => handleAddFilterWithValue(field, 'isNull')}>
                 Is Null
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('isNotNull')}>
+                onClick={() => handleAddFilterWithValue(field, 'isNotNull')}>
                 Is Not Null
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('isEmpty')}>
+                onClick={() => handleAddFilterWithValue(field, 'isEmpty')}>
                 Is Empty
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('isNotEmpty')}>
+                onClick={() => handleAddFilterWithValue(field, 'isNotEmpty')}>
                 Is Not Empty
               </DropdownMenuItem>
               {fieldType === 'number' && (
                 <>
                   <DropdownMenuSeparator className="my-1 border-gray-200" />
                   <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                    onClick={() => handleAddFilterWithValue('greaterThan')}>
+                    onClick={() => handleAddFilterWithValue(field, 'greaterThan')}>
                     Greater Than...
                   </DropdownMenuItem>
                   <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                    onClick={() => handleAddFilterWithValue('lessThan')}>
+                    onClick={() => handleAddFilterWithValue(field, 'lessThan')}>
                     Less Than...
                   </DropdownMenuItem>
                   <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                    onClick={() => handleAddFilterWithValue('between')}>
+                    onClick={() => handleAddFilterWithValue(field, 'between')}>
                     Between...
                   </DropdownMenuItem>
                 </>
               )}
               <DropdownMenuSeparator className="my-1 border-gray-200" />
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('in')}>
+                onClick={() => handleAddFilterWithValue(field, 'in')}>
                 In List...
               </DropdownMenuItem>
               <DropdownMenuItem className="px-3 py-2 text-sm hover:bg-gray-100 cursor-pointer" 
-                onClick={() => handleAddFilterWithValue('notIn')}>
+                onClick={() => handleAddFilterWithValue(field, 'notIn')}>
                 Not In List...
               </DropdownMenuItem>
             </DropdownMenuSubContent>
@@ -1075,6 +1236,17 @@ export default function DashboardPage() {
           initial: "Hi! I can help you connect to your Airtable base and explore the data.",
         }}
       />
+
+      {/* Add FilterModal */}
+      {filterModal.isOpen && filterModal.field && filterModal.operator && (
+        <FilterModal
+          isOpen={filterModal.isOpen}
+          onClose={() => setFilterModal({ isOpen: false, field: null, operator: null })}
+          onApply={handleAddFilter}
+          field={filterModal.field}
+          operator={filterModal.operator}
+        />
+      )}
     </div>
   );
 } 

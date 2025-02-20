@@ -14,6 +14,7 @@ import {
   BaseMessage,
 } from "@langchain/core/messages";
 import { ToolCall } from "@langchain/core/messages/tool";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
 import { 
   task,
   entrypoint,
@@ -82,11 +83,13 @@ const getWeather = createTool({
   },
 });
 
+const tavilyTool = new TavilySearchResults();
+
 // Define base tools
-const baseTools = [getWeather];
+const baseTools = [getWeather, tavilyTool];
 
 // Define tool types
-type ToolType = typeof getWeather;
+type ToolType = typeof getWeather | typeof tavilyTool;
 interface ToolsByName {
   [key: string]: ToolType;
 }
