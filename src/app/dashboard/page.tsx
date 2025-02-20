@@ -1019,6 +1019,90 @@ export default function DashboardPage() {
     }, {} as Record<string, FieldStatistics>);
   }, [tableData, selectedTableFields]);
 
+  // Action to update selected records
+  useCopilotAction({
+    name: "updateSelectedRecords",
+    description: "Update one or more fields in the selected records",
+    parameters: [
+      {
+        name: "updates",
+        type: "object",
+        description: "An object containing field names and their new values",
+      },
+    ],
+    handler: async ({ updates }) => {
+      if (selectedRecords.length === 0) {
+        throw new Error("No records selected. Please select at least one record to update.");
+      }
+
+      try {
+        setSaving(true);
+        setError(null);
+
+        // Process updates for each selected record
+        const updatePromises = selectedRecords.map(async (recordId) => {
+          const record = tableData.find(r => r.id === recordId);
+          if (!record) return null;
+
+          // Validate field names
+          const invalidFields = Object.keys(updates).filter(
+            fieldName => !selectedTableFields.some(f => f.name === fieldName)
+          );
+
+          if (invalidFields.length > 0) {
+            throw new Error(`Invalid field names: ${invalidFields.join(", ")}`);
+          }
+
+          // Merge existing fields with updates
+          const updatedFields = {
+            ...record.fields,
+            ...updates
+          };
+
+          const response = await fetch("/api/airtable/update", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              apiKey,
+              baseId,
+              tableName: selectedTable,
+              recordId,
+              fields: updatedFields,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to update record ${recordId}`);
+          }
+
+          return response.json();
+        });
+
+        const results = await Promise.all(updatePromises);
+        const successfulUpdates = results.filter(Boolean);
+
+        // Update the table data with the new records
+        setTableData(tableData.map(record => {
+          const updatedRecord = successfulUpdates.find(u => u.id === record.id);
+          return updatedRecord || record;
+        }));
+
+        // Clear selection after successful update
+        setSelectedRecords([]);
+        
+        return `Successfully updated ${successfulUpdates.length} records`;
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "Failed to update records";
+        setError(errorMessage);
+        throw new Error(errorMessage);
+      } finally {
+        setSaving(false);
+      }
+    },
+  });
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
