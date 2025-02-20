@@ -20,36 +20,69 @@ import {
   addMessages,
   MemorySaver,
   getPreviousState,
-  LangGraphRunnableConfig
+  LangGraphRunnableConfig,
+  interrupt
 } from "@langchain/langgraph";
-import { v4 as uuidv4 } from "uuid";
 
-// Initialize the LLM
+// Define the state type for our agent
+interface AgentState {
+  messages: BaseMessage[];
+  tools: ToolType[];
+  threadId: string;
+}
+
+// Initialize the LLM with retry logic
 const model = new ChatOpenAI({
   modelName: "gpt-4o-mini",
   temperature: 0,
+  maxRetries: 3,
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Define example weather tool
-const getWeather = tool(async ({ location }: { location: string }) => {
-  const lowercaseLocation = location.toLowerCase();
-  if (lowercaseLocation.includes("sf") || lowercaseLocation.includes("san francisco")) {
-    return "It's sunny!";
-  } else if (lowercaseLocation.includes("boston")) {
-    return "It's rainy!";
-  } else {
-    return `I am not sure what the weather in ${location}`;
-  }
-}, {
+// Tool creation helper
+const createTool = (config: {
+  name: string;
+  description: string;
+  schema: z.ZodType<any>;
+  handler: (args: any) => Promise<any>;
+}) => {
+  return tool(
+    async (args: any) => {
+      try {
+        return await config.handler(args);
+      } catch (error) {
+        console.error(`Tool ${config.name} failed:`, error);
+        throw error;
+      }
+    },
+    {
+      name: config.name,
+      description: config.description,
+      schema: config.schema,
+    }
+  );
+};
+
+// Define example weather tool using the helper
+const getWeather = createTool({
   name: "getWeather",
+  description: "Call to get the weather from a specific location.",
   schema: z.object({
     location: z.string().describe("location to get the weather for"),
   }),
-  description: "Call to get the weather from a specific location."
+  handler: async ({ location }: { location: string }) => {
+    const lowercaseLocation = location.toLowerCase();
+    if (lowercaseLocation.includes("sf") || lowercaseLocation.includes("san francisco")) {
+      return "It's sunny!";
+    } else if (lowercaseLocation.includes("boston")) {
+      return "It's rainy!";
+    } else {
+      return `I am not sure what the weather in ${location}`;
+    }
+  },
 });
 
-// Define base tools (these will be combined with Copilot actions)
+// Define base tools
 const baseTools = [getWeather];
 
 // Define tool types
@@ -63,27 +96,46 @@ type ConfigurableType = {
   toolsByName?: ToolsByName;
 };
 
-// Define tasks
-// const callModel = task("callModel", async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
-//   const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
-//   const tools = Object.values(toolsByName);
-//   const response = await model.bindTools(tools).invoke(messages);
-//   return response;
-// });
-
-const callTool = task(
-  "callTool",
-  async (toolCall: ToolCall, config: LangGraphRunnableConfig<ConfigurableType>): Promise<ToolMessage> => {
-    const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
-    const tool = toolsByName[toolCall.name];
-    if (!tool) {
-      throw new Error(`Tool ${toolCall.name} not found`);
+// Task to call the LLM
+const callLLM = task(
+  {
+    name: "callLLM",
+    retry: { maxAttempts: 3 },
+  },
+  async (messages: BaseMessageLike[], tools: ToolType[]) => {
+    try {
+      const boundModel = model.bindTools(tools);
+      return boundModel.invoke(messages);
+    } catch (error) {
+      console.error('LLM call failed:', error);
+      throw error;
     }
-    const observation = await tool.invoke(toolCall.args as { location: string });
-    return new ToolMessage({ 
-      content: observation, 
-      tool_call_id: toolCall.id ?? "default_id"
-    });
+  }
+);
+
+// Task to execute tools with idempotency
+const executeTools = task(
+  "executeTools",
+  async (toolCalls: ToolCall[], toolsByName: ToolsByName): Promise<ToolMessage[]> => {
+    const results = new Map<string, ToolMessage>();
+    
+    for (const toolCall of toolCalls) {
+      const idempotencyKey = `${toolCall.name}:${JSON.stringify(toolCall.args)}`;
+      
+      if (!results.has(idempotencyKey)) {
+        const tool = toolsByName[toolCall.name];
+        if (!tool) throw new Error(`Tool ${toolCall.name} not found`);
+        
+        const result = new ToolMessage({
+          content: await tool.invoke(toolCall.args),
+          tool_call_id: toolCall.id ?? "default_id"
+        });
+        
+        results.set(idempotencyKey, result);
+      }
+    }
+    
+    return Array.from(results.values());
   }
 );
 
@@ -95,51 +147,91 @@ const agent = entrypoint({
   name: "agent",
   checkpointer,
 }, async (messages: BaseMessageLike[], config: LangGraphRunnableConfig<ConfigurableType>) => {
-  const previous = getPreviousState<BaseMessage[]>() ?? [];
-  let currentMessages = addMessages(previous, messages);
+  // Get previous state or initialize new one
+  const previous = getPreviousState<AgentState>() ?? {
+    messages: [],
+    tools: baseTools,
+    threadId: config.configurable?.thread_id ?? ''
+  };
+
+  // Update current messages with history
+  let currentMessages = addMessages(previous.messages, messages);
   
-  // Get tools from toolsByName or use base tools
-  const toolsByName = config.configurable?.toolsByName ?? Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
+  // Get tools from config or use base tools
+  const toolsByName = config.configurable?.toolsByName ?? 
+    Object.fromEntries(baseTools.map(tool => [tool.name, tool]));
   const availableTools = Object.values(toolsByName);
-  
-  // Bind the tools to the model
-  const boundModel = model.bindTools(availableTools);
-  let llmResponse = await boundModel.invoke(currentMessages);
+
+  // Stream the current state
+  config.writer?.({
+    type: 'state_update',
+    messages: currentMessages,
+    tools: availableTools.map(t => t.name)
+  });
+
+  // Call LLM with current messages and tools
+  let llmResponse = await callLLM(currentMessages, availableTools);
   
   while (true) {
     if (!llmResponse.tool_calls?.length) {
       break;
     }
 
-    const toolResults = await Promise.all(
-      llmResponse.tool_calls.map((toolCall: ToolCall) => {
-        const tool = toolsByName[toolCall.name];
-        if (!tool) {
-          throw new Error(`Tool ${toolCall.name} not found`);
-        }
-        return callTool(toolCall, { configurable: { toolsByName } });
-      })
-    );
+    // Execute tools with idempotency
+    const toolResults = await executeTools(llmResponse.tool_calls, toolsByName);
+
+    // Stream tool execution results
+    config.writer?.({
+      type: 'tool_execution',
+      results: toolResults.map(r => ({ 
+        tool: r.tool_call_id,
+        result: r.content 
+      }))
+    });
 
     // Append to message list
     currentMessages = addMessages(currentMessages, [llmResponse, ...toolResults]);
 
+    // Check if we need human review
+    if (needsHumanReview(llmResponse)) {
+      const humanApproval = interrupt({
+        messages: currentMessages,
+        response: llmResponse,
+        action: "Please review this response"
+      });
+      
+      if (!humanApproval) {
+        // If not approved, get a new response
+        llmResponse = await callLLM(currentMessages, availableTools);
+        continue;
+      }
+    }
+
     // Call model again with bound tools
-    llmResponse = await boundModel.invoke(currentMessages);
+    llmResponse = await callLLM(currentMessages, availableTools);
   }
 
-  // Append final response for storage
-  currentMessages = addMessages(currentMessages, llmResponse);
-
+  // Return final response and save state
   return entrypoint.final({
     value: llmResponse,
-    save: currentMessages,
+    save: {
+      messages: currentMessages,
+      tools: availableTools,
+      threadId: config.configurable?.thread_id ?? ''
+    }
   });
 });
 
+// Helper function to determine if human review is needed
+function needsHumanReview(response: AIMessage): boolean {
+  // Add your logic here to determine if human review is needed
+  // For example, check for specific keywords or confidence scores
+  return false; // Default to false for now
+}
+
 // Create the LangChain adapter with the agent
 const serviceAdapter = new LangChainAdapter({
-  chainFn: async ({ messages, tools: copilotTools, threadId: threadId }, req?: NextRequest) => {
+  chainFn: async ({ messages, tools: copilotTools, threadId }, req?: NextRequest) => {
     // Combine base tools with Copilot action tools and create tools map
     const allTools = [...baseTools, ...(copilotTools || [])] as ToolType[];
     const toolsByName = Object.fromEntries(allTools.map((tool) => [tool.name, tool])) as ToolsByName;
@@ -151,8 +243,13 @@ const serviceAdapter = new LangChainAdapter({
       }
     };
 
-    const result = await agent.invoke(messages, config);
-    return new AIMessage({ content: result.content });
+    try {
+      const result = await agent.invoke(messages, config);
+      return new AIMessage({ content: result.content });
+    } catch (error) {
+      console.error('Agent execution failed:', error);
+      throw error;
+    }
   },
 });
 
@@ -165,5 +262,13 @@ export const POST = async (req: NextRequest) => {
     endpoint: "/api/copilotkit",
   });
 
-  return handleRequest(req);
+  try {
+    return await handleRequest(req);
+  } catch (error) {
+    console.error('Request handling failed:', error);
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    );
+  }
 };

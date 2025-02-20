@@ -38,3 +38,6 @@ export async function POST(req: NextRequest) {
     );
   }
 } 
+
+
+// how to make the loaded airtable data editable and update the airtable from this ui?
