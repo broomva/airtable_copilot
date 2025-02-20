@@ -218,6 +218,100 @@ function FilterModal({ isOpen, onClose, onApply, field, operator }: FilterModalP
   );
 }
 
+interface FieldStatistics {
+  totalRecords: number;
+  nonNullCount: number;
+  uniqueCount: number;
+  numeric?: {
+    min: number;
+    max: number;
+    mean: number;
+    variance: number;
+    stdDev: number;
+  };
+  categorical?: {
+    topValues: Array<{ value: string; count: number }>;
+    emptyCount: number;
+  };
+}
+
+const calculateFieldStatistics = (data: AirtableRecord[], field: { name: string; type: string }): FieldStatistics => {
+  const values = data.map(record => record.fields[field.name]);
+  const nonNullValues = values.filter(v => v !== null && v !== undefined);
+  const uniqueValues = new Set(nonNullValues.map(v => String(v)));
+
+  const baseStats = {
+    totalRecords: values.length,
+    nonNullCount: nonNullValues.length,
+    uniqueCount: uniqueValues.size,
+  };
+
+  if (field.type.toLowerCase() === 'number') {
+    const numbers = nonNullValues.map(v => Number(v)).filter(n => !isNaN(n));
+    if (numbers.length === 0) return baseStats;
+
+    const sum = numbers.reduce((a, b) => a + b, 0);
+    const mean = sum / numbers.length;
+    const squaredDiffs = numbers.map(n => Math.pow(n - mean, 2));
+    const variance = squaredDiffs.reduce((a, b) => a + b, 0) / numbers.length;
+
+    return {
+      ...baseStats,
+      numeric: {
+        min: Math.min(...numbers),
+        max: Math.max(...numbers),
+        mean: mean,
+        variance: variance,
+        stdDev: Math.sqrt(variance)
+      }
+    };
+  } else {
+    // For text and other types
+    const valueCounts = nonNullValues.reduce((acc, val) => {
+      const strVal = String(val);
+      acc[strVal] = (acc[strVal] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const topValues = Object.entries(valueCounts)
+      .sort(([, a], [, b]) => (b as number) - (a as number))
+      .slice(0, 5)
+      .map(([value, count]) => ({ value, count: count as number }));
+
+    return {
+      ...baseStats,
+      categorical: {
+        topValues,
+        emptyCount: values.length - nonNullValues.length
+      }
+    };
+  }
+};
+
+const formatStatistics = (stats: FieldStatistics, fieldType: string): string => {
+  let result = `Records: ${stats.totalRecords}\n`;
+  result += `Non-null: ${stats.nonNullCount}\n`;
+  result += `Unique values: ${stats.uniqueCount}\n`;
+
+  if (stats.numeric) {
+    result += `\nNumeric Statistics:\n`;
+    result += `Min: ${stats.numeric.min.toFixed(2)}\n`;
+    result += `Max: ${stats.numeric.max.toFixed(2)}\n`;
+    result += `Mean: ${stats.numeric.mean.toFixed(2)}\n`;
+    result += `Std Dev: ${stats.numeric.stdDev.toFixed(2)}`;
+  }
+
+  if (stats.categorical) {
+    result += `\nTop Values:\n`;
+    stats.categorical.topValues.forEach(({ value, count }) => {
+      result += `${value}: ${count} records\n`;
+    });
+    result += `Empty: ${stats.categorical.emptyCount} records`;
+  }
+
+  return result;
+};
+
 export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseId, setBaseId] = useState("");
@@ -917,6 +1011,14 @@ export default function DashboardPage() {
     );
   };
 
+  // Add memoized field statistics
+  const fieldStatistics = useMemo(() => {
+    return selectedTableFields.reduce((acc, field) => {
+      acc[field.name] = calculateFieldStatistics(tableData, field);
+      return acc;
+    }, {} as Record<string, FieldStatistics>);
+  }, [tableData, selectedTableFields]);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -1106,12 +1208,24 @@ export default function DashboardPage() {
                             <th key={field.id} className="px-4 py-2 text-left font-medium">
                               <div className="flex items-center gap-2">
                                 <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="ghost" size="sm" className="-ml-3">
-                                      {field.name}
-                                      <ArrowUpDown className="ml-2 h-4 w-4" />
-                                    </Button>
-                                  </DropdownMenuTrigger>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" size="sm" className="-ml-3">
+                                            {field.name}
+                                            <ArrowUpDown className="ml-2 h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap bg-white p-4 rounded-md shadow-lg border">
+                                        <div className="font-semibold mb-2">{field.name} ({field.type})</div>
+                                        <div className="text-sm text-gray-600">
+                                          {formatStatistics(fieldStatistics[field.name], field.type)}
+                                        </div>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
                                   {renderFilterMenu(field)}
                                 </DropdownMenu>
                               </div>
