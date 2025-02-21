@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+import { useCopilotChatSuggestions } from "@copilotkit/react-ui";
 
 interface AirtableTable {
   id: string;
@@ -321,44 +322,6 @@ interface SearchResult {
   [key: string]: any;
 }
 
-function SearchResults({ results, isSearching }: { results: SearchResult[], isSearching: boolean }) {
-  if (isSearching) {
-    return (
-      <div className="text-center py-4">
-        <p className="text-gray-500">Searching...</p>
-      </div>
-    );
-  }
-
-  if (!results || !results.length) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-4">
-      <h3 className="text-xl font-semibold">Web Search Results</h3>
-      <div className="space-y-4">
-        {results.map((result, index) => (
-          <div key={index} className="border-b pb-4 last:border-0">
-            <a 
-              href={result.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-blue-600 hover:underline font-medium"
-            >
-              {result.title}
-            </a>
-            <p className="text-sm text-gray-600 mt-1">{result.content}</p>
-            <p className="text-xs text-gray-400 mt-1">
-              Relevance score: {(result.score * 100).toFixed(1)}%
-            </p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
 export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseId, setBaseId] = useState("");
@@ -389,7 +352,6 @@ export default function DashboardPage() {
     field: null,
     operator: null,
   });
-  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
   // Initialize state from localStorage
@@ -1154,7 +1116,7 @@ export default function DashboardPage() {
     },
   });
 
-  // Update Tavily search action to use the proxy API
+  // Update Tavily search action to use the proxy API and render in chat
   useCopilotAction({
     name: "searchWeb",
     description: "Search the web using Tavily API to find relevant information",
@@ -1181,8 +1143,7 @@ export default function DashboardPage() {
         }
 
         const data = await response.json();
-        setSearchResults(data.results);
-        return `Found ${data.results.length} results for "${query}"`;
+        return data.results;
       } catch (error) {
         console.error('Search error:', error);
         throw new Error('Failed to perform web search');
@@ -1190,18 +1151,92 @@ export default function DashboardPage() {
         setIsSearching(false);
       }
     },
+    render: ({ status, args, result }) => {
+      if (status === 'inProgress') {
+        return `Searching for "${args.query}"...`;
+      }
+      
+      if (status === 'executing') {
+        return "Fetching search results...";
+      }
+
+      if (!result || result.length === 0) {
+        return "No results found.";
+      }
+
+      return (
+        <div className="space-y-4 bg-white rounded-lg overflow-hidden">
+          <h3 className="text-xl font-semibold px-4 pt-4">Web Search Results</h3>
+          <div className="space-y-4 px-4 pb-4">
+            {result.map((item: SearchResult, index: number) => (
+              <div key={index} className="border-b pb-4 last:border-0">
+                <a 
+                  href={item.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-blue-600 hover:underline font-medium"
+                >
+                  {item.title}
+                </a>
+                <p className="text-sm text-gray-600 mt-1">{item.content}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  Relevance score: {(item.score * 100).toFixed(1)}%
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    },
   });
 
   // Expose search results to copilot
   useCopilotReadable({
     description: "The current web search results from Tavily",
     value: {
-      hasResults: searchResults.length > 0,
-      resultCount: searchResults.length,
       isSearching,
-      results: searchResults,
     },
   });
+
+  // Add chat suggestions based on dashboard state
+  useCopilotChatSuggestions(
+    {
+      instructions: `
+        Based on the current dashboard state, here are some suggested actions:
+        ${selectedRecords.length > 0 
+          ? `\n- Search for information about the ${selectedRecords.length} selected record(s)
+             \n- Update values for the selected record(s)
+             \n- Use information from the selected record to search the web and update the selected record values
+             \n- Get statistics about the selected record(s)`
+          : ''
+        }
+        ${selectedTable 
+          // ? `\n- Get information about the "${selectedTable}" table structure
+          //    \n- Search for best practices or documentation about ${selectedTable}
+          //    \n- Analyze the table data distribution
+          //    \n- Get field statistics for specific columns`
+          // : ''
+        }
+        ${searchTerm 
+          ? `\n- Refine the current search for "${searchTerm}"
+             \n- Search the web for information related to "${searchTerm}"`
+          : ''
+        }
+        ${filters.conditions.length > 0
+          ? `\n- Modify or clear the current filters
+             \n- Save this filter configuration
+             \n- Search for records matching these filters`
+          : ''
+        }
+        \n- Connect to a different Airtable base
+        \n- Export or analyze the current data
+        \n- Get help with Airtable formulas or field types
+      `,
+      minSuggestions: 1,
+      maxSuggestions: 3,
+    },
+    [selectedRecords, selectedTable, searchTerm, filters]
+  );
 
   return (
     <div className="min-h-screen bg-background">
@@ -1228,16 +1263,7 @@ export default function DashboardPage() {
 
       <div className="container py-8">
         {/* Web Search Results Section */}
-        {(searchResults.length > 0 || isSearching) && (
-          <Card className="mb-8">
-            <CardHeader>
-              <CardTitle>Web Search Results</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <SearchResults results={searchResults} isSearching={isSearching} />
-            </CardContent>
-          </Card>
-        )}
+        {/* Remove the search results card since we're showing results in chat */}
 
         {/* Credentials Section */}
         <div className="mb-8">
@@ -1563,6 +1589,7 @@ export default function DashboardPage() {
 
       <CopilotSidebar
         defaultOpen={true}
+        clickOutsideToClose={false}
         labels={{
           title: "Dashboard Assistant",
           initial: "Hi! I can help you connect to your Airtable base, explore the data, and search the web for relevant information.",
