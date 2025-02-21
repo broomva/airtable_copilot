@@ -42,6 +42,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
 
 interface AirtableTable {
   id: string;
@@ -312,6 +313,52 @@ const formatStatistics = (stats: FieldStatistics, fieldType: string): string => 
   return result;
 };
 
+interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  score: number;
+  [key: string]: any;
+}
+
+function SearchResults({ results, isSearching }: { results: SearchResult[], isSearching: boolean }) {
+  if (isSearching) {
+    return (
+      <div className="text-center py-4">
+        <p className="text-gray-500">Searching...</p>
+      </div>
+    );
+  }
+
+  if (!results || !results.length) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4">
+      <h3 className="text-xl font-semibold">Web Search Results</h3>
+      <div className="space-y-4">
+        {results.map((result, index) => (
+          <div key={index} className="border-b pb-4 last:border-0">
+            <a 
+              href={result.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium"
+            >
+              {result.title}
+            </a>
+            <p className="text-sm text-gray-600 mt-1">{result.content}</p>
+            <p className="text-xs text-gray-400 mt-1">
+              Relevance score: {(result.score * 100).toFixed(1)}%
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseId, setBaseId] = useState("");
@@ -342,6 +389,8 @@ export default function DashboardPage() {
     field: null,
     operator: null,
   });
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Initialize state from localStorage
   useEffect(() => {
@@ -1031,9 +1080,11 @@ export default function DashboardPage() {
       },
     ],
     handler: async ({ updates }) => {
+      console.log('updates', updates);
       if (selectedRecords.length === 0) {
         throw new Error("No records selected. Please select at least one record to update.");
       }
+      console.log('Running update with:', updates);
 
       try {
         setSaving(true);
@@ -1103,6 +1154,55 @@ export default function DashboardPage() {
     },
   });
 
+  // Update Tavily search action to use the proxy API
+  useCopilotAction({
+    name: "searchWeb",
+    description: "Search the web using Tavily API to find relevant information",
+    parameters: [
+      {
+        name: "query",
+        type: "string",
+        description: "The search query to look up",
+      },
+    ],
+    handler: async ({ query }) => {
+      try {
+        setIsSearching(true);
+        const response = await fetch("/api/tavily", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Search request failed');
+        }
+
+        const data = await response.json();
+        setSearchResults(data.results);
+        return `Found ${data.results.length} results for "${query}"`;
+      } catch (error) {
+        console.error('Search error:', error);
+        throw new Error('Failed to perform web search');
+      } finally {
+        setIsSearching(false);
+      }
+    },
+  });
+
+  // Expose search results to copilot
+  useCopilotReadable({
+    description: "The current web search results from Tavily",
+    value: {
+      hasResults: searchResults.length > 0,
+      resultCount: searchResults.length,
+      isSearching,
+      results: searchResults,
+    },
+  });
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -1127,6 +1227,18 @@ export default function DashboardPage() {
       </header>
 
       <div className="container py-8">
+        {/* Web Search Results Section */}
+        {(searchResults.length > 0 || isSearching) && (
+          <Card className="mb-8">
+            <CardHeader>
+              <CardTitle>Web Search Results</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <SearchResults results={searchResults} isSearching={isSearching} />
+            </CardContent>
+          </Card>
+        )}
+
         {/* Credentials Section */}
         <div className="mb-8">
           <TooltipProvider>
@@ -1453,7 +1565,7 @@ export default function DashboardPage() {
         defaultOpen={true}
         labels={{
           title: "Dashboard Assistant",
-          initial: "Hi! I can help you connect to your Airtable base and explore the data.",
+          initial: "Hi! I can help you connect to your Airtable base, explore the data, and search the web for relevant information.",
         }}
       />
 

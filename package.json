@@ -14,6 +14,7 @@
     "@copilotkit/react-ui": "^1.5.20",
     "@copilotkit/runtime": "^1.5.20",
     "@copilotkit/runtime-client-gql": "^1.5.20",
+    "@copilotkit/sdk-js": "^1.5.20",
     "@langchain/langgraph": "^0.2.46",
     "@radix-ui/react-accordion": "^1.2.0",
     "@radix-ui/react-dialog": "^1.1.6",

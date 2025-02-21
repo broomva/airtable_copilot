@@ -13,8 +13,75 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Github } from "lucide-react";
+import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
+
+interface SearchResult {
+  title: string;
+  url: string;
+  content: string;
+  score: number;
+  [key: string]: any;
+}
+
+// Initialize Tavily search tool
+const searchTavily = new TavilySearchResults({
+  maxResults: 3,
+  apiKey: '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',
+});
 
 export default function Home() {
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+
+  // Update Tavily search action to use the proxy API
+  useCopilotAction({
+    name: "searchWeb",
+    description: "Search the web using Tavily API",
+    parameters: [
+      {
+        name: "query",
+        type: "string",
+        description: "The search query to look up",
+      },
+    ],
+    handler: async ({ query }) => {
+      try {
+        setIsSearching(true);
+        const response = await fetch("/api/tavily", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Search request failed');
+        }
+
+        const data = await response.json();
+        setSearchResults(data.results);
+        return `Found ${data.results.length} results for "${query}"`;
+      } catch (error) {
+        console.error('Search error:', error);
+        throw new Error('Failed to perform web search');
+      } finally {
+        setIsSearching(false);
+      }
+    },
+  });
+
+  // Expose search results to copilot
+  useCopilotReadable({
+    description: "The current web search results from Tavily",
+    value: {
+      hasResults: searchResults.length > 0,
+      resultCount: searchResults.length,
+      isSearching,
+      results: searchResults,
+    },
+  });
+
   return (
     <main className="min-h-screen bg-background">
       {/* Header */}
@@ -215,14 +282,102 @@ function PricingCard({
   );
 }
 
+function SearchResults({ results, isSearching }: { results: SearchResult[], isSearching: boolean }) {
+  if (isSearching) {
+    return (
+      <div className="text-center py-4">
+        <p className="text-gray-500">Searching...</p>
+      </div>
+    );
+  }
+
+  if (!results.length) {
+    return null;
+  }
+
+  return (
+    <div className="space-y-4 bg-white p-6 rounded-lg shadow-lg">
+      <h3 className="text-xl font-semibold">Search Results</h3>
+      <div className="space-y-4">
+        {results.map((result, index) => (
+          <div key={index} className="border-b pb-4 last:border-0">
+            <a 
+              href={result.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 hover:underline font-medium"
+            >
+              {result.title}
+            </a>
+            <p className="text-sm text-gray-600 mt-1">{result.content}</p>
+            <p className="text-xs text-gray-400 mt-1">
+              Relevance score: {(result.score * 100).toFixed(1)}%
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DemoContent() {
   const [backgroundColor, setBackgroundColor] = useState("#ADD8E6");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
+  // Add Tavily search action
+  useCopilotAction({
+    name: "searchWeb",
+    description: "Search the web using Tavily API",
+    parameters: [
+      {
+        name: "query",
+        type: "string",
+        description: "The search query to look up",
+      },
+    ],
+    handler: async ({ query }) => {
+      try {
+        setIsSearching(true);
+        const response = await fetch("/api/tavily", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ query }),
+        });
+
+        if (!response.ok) {
+          throw new Error('Search request failed');
+        }
+
+        const data = await response.json();
+        setSearchResults(data.results);
+        return `Found ${data.results.length} results for "${query}"`;
+      } catch (error) {
+        console.error('Search error:', error);
+        throw new Error('Failed to perform web search');
+      } finally {
+        setIsSearching(false);
+      }
+    },
+  });
+
+  // Expose search results to copilot
+  useCopilotReadable({
+    description: "The current web search results from Tavily",
+    value: {
+      hasResults: searchResults.length > 0,
+      resultCount: searchResults.length,
+      isSearching,
+      results: searchResults,
+    },
+  });
 
   return (
     <div
       style={{ backgroundColor }}
-      className="w-full max-w-2xl p-8 rounded-xl transition-colors"
+      className="w-full max-w-2xl p-8 rounded-xl transition-colors space-y-6"
     >
       <div className="bg-white p-6 rounded-lg shadow-lg">
         <h3 className="text-xl font-semibold mb-4">Interactive Demo</h3>
@@ -231,10 +386,13 @@ function DemoContent() {
         </p>
         <ul className="list-disc list-inside space-y-2 text-gray-600">
           <li>Change the background color</li>
+          <li>Search the web for any topic</li>
           <li>Explain how the agent works</li>
           <li>Show available actions</li>
         </ul>
       </div>
+
+      <SearchResults results={searchResults} isSearching={isSearching} />
     </div>
   );
 }
