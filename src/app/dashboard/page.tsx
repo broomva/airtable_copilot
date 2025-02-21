@@ -19,7 +19,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ChevronDown, ChevronUp, Github, Home, Settings, Pencil, Save, X, Search, ArrowUpDown, ChevronLeft, ChevronRight, Trash, Filter } from "lucide-react";
+import { ChevronDown, ChevronUp, Github, Home, Settings, Pencil, Save, X, Search, ArrowUpDown, ChevronLeft, ChevronRight, Trash, Filter, GripVertical } from "lucide-react";
 import Link from "next/link";
 import {
   DropdownMenu,
@@ -44,6 +44,23 @@ import {
 import { Label } from "@/components/ui/label";
 import { TavilySearchResults } from "@langchain/community/tools/tavily_search";
 import { useCopilotChatSuggestions } from "@copilotkit/react-ui";
+import {
+  DndContext,
+  DragEndEvent,
+  DragStartEvent,
+  MouseSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  sortableKeyboardCoordinates,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { createPortal } from "react-dom";
 
 interface AirtableTable {
   id: string;
@@ -322,6 +339,121 @@ interface SearchResult {
   [key: string]: any;
 }
 
+interface SortableColumnHeaderProps {
+  field: { id: string; name: string; type: string };
+  onSort: () => void;
+  sortConfig: SortConfig | null;
+  renderFilterMenu: (field: { name: string; type: string }) => React.ReactNode;
+  fieldStatistics: FieldStatistics;
+  columnResizing: { [key: string]: { width: number } };
+  onColumnResize: (fieldId: string, width: number) => void;
+}
+
+function SortableColumnHeader({
+  field,
+  onSort,
+  sortConfig,
+  renderFilterMenu,
+  fieldStatistics,
+  columnResizing,
+  onColumnResize,
+}: SortableColumnHeaderProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: field.id });
+
+  const width = columnResizing[field.id]?.width || 150;
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    width: `${width}px`,
+    position: 'relative' as const,
+    touchAction: 'none',
+  };
+
+  const [isResizing, setIsResizing] = useState(false);
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(true);
+
+    const startX = e.pageX;
+    const startWidth = width;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      e.preventDefault();
+      const newWidth = Math.max(50, startWidth + (e.pageX - startX));
+      onColumnResize(field.id, newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'col-resize';
+  };
+
+  return (
+    <th
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      className="relative group select-none border-b border-r border-gray-200 bg-gray-50"
+    >
+      <div className="flex items-center gap-2 px-4 py-2">
+        <button
+          type="button"
+          {...listeners}
+          className="cursor-grab opacity-0 group-hover:opacity-100 transition-opacity"
+        >
+          <GripVertical className="h-4 w-4 text-gray-400" />
+        </button>
+        <DropdownMenu>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="-ml-3">
+                    {field.name}
+                    <ArrowUpDown className="ml-2 h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap bg-white p-4 rounded-md shadow-lg border">
+                <div className="font-semibold mb-2">{field.name} ({field.type})</div>
+                <div className="text-sm text-gray-600">
+                  {formatStatistics(fieldStatistics, field.type)}
+                </div>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+          {renderFilterMenu({ name: field.name, type: field.type })}
+        </DropdownMenu>
+      </div>
+      <div
+        onMouseDown={handleResizeStart}
+        className={`absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-blue-400 hover:opacity-100 transition-colors ${
+          isResizing ? 'bg-blue-400' : 'bg-transparent'
+        }`}
+        style={{ cursor: 'col-resize' }}
+      />
+    </th>
+  );
+}
+
 export default function DashboardPage() {
   const [apiKey, setApiKey] = useState("");
   const [baseId, setBaseId] = useState("");
@@ -353,6 +485,28 @@ export default function DashboardPage() {
     operator: null,
   });
   const [isSearching, setIsSearching] = useState(false);
+
+  // Add new state for column ordering and resizing
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
+  const [columnResizing, setColumnResizing] = useState<{
+    [key: string]: { width: number };
+  }>({});
+  const [isDragging, setIsDragging] = useState(false);
+
+  // Add sensors for drag and drop
+  const sensors = useSensors(
+    useSensor(MouseSensor, {
+      activationConstraint: {
+        distance: 10,
+      },
+    }),
+    useSensor(TouchSensor, {
+      activationConstraint: {
+        delay: 250,
+        tolerance: 5,
+      },
+    })
+  );
 
   // Initialize state from localStorage
   useEffect(() => {
@@ -834,20 +988,17 @@ export default function DashboardPage() {
 
   // Add new hook to expose selected rows data
   useCopilotReadable({
-    description: "The currently selected rows in the table (limited to 10 rows for context)",
+    description: "The currently selected rows in the table",
     value: {
-      totalSelected: selectedRecords.length,
-      selectedRows: selectedRecords.slice(0, 10).map(recordId => {
+      selectedRecords,
+      selectedRecordsData: selectedRecords.map(recordId => {
         const record = tableData.find(r => r.id === recordId);
         return record ? {
           id: record.id,
           fields: record.fields
         } : null;
       }).filter(Boolean),
-      hasMoreSelected: selectedRecords.length > 10,
-      message: selectedRecords.length > 10 
-        ? `Note: Only showing first 10 of ${selectedRecords.length} selected rows for context`
-        : undefined
+      totalSelected: selectedRecords.length,
     }
   });
 
@@ -1042,11 +1193,9 @@ export default function DashboardPage() {
       },
     ],
     handler: async ({ updates }) => {
-      console.log('updates', updates);
       if (selectedRecords.length === 0) {
         throw new Error("No records selected. Please select at least one record to update.");
       }
-      console.log('Running update with:', updates);
 
       try {
         setSaving(true);
@@ -1116,86 +1265,28 @@ export default function DashboardPage() {
     },
   });
 
-  // Update Tavily search action to use the proxy API and render in chat
+  // Add action to get selected records data
   useCopilotAction({
-    name: "searchWeb",
-    description: "Search the web using Tavily API to find relevant information",
-    parameters: [
-      {
-        name: "query",
-        type: "string",
-        description: "The search query to look up",
-      },
-    ],
-    handler: async ({ query }) => {
-      try {
-        setIsSearching(true);
-        const response = await fetch("/api/tavily", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ query }),
-        });
-
-        if (!response.ok) {
-          throw new Error('Search request failed');
-        }
-
-        const data = await response.json();
-        return data.results;
-      } catch (error) {
-        console.error('Search error:', error);
-        throw new Error('Failed to perform web search');
-      } finally {
-        setIsSearching(false);
-      }
-    },
-    render: ({ status, args, result }) => {
-      if (status === 'inProgress') {
-        return `Searching for "${args.query}"...`;
-      }
-      
-      if (status === 'executing') {
-        return "Fetching search results...";
+    name: "getSelectedRecordsData",
+    description: "Get the data for currently selected records",
+    handler: async () => {
+      if (selectedRecords.length === 0) {
+        return { records: [], total: 0 };
       }
 
-      if (!result || result.length === 0) {
-        return "No results found.";
-      }
+      const records = selectedRecords.map(recordId => {
+        const record = tableData.find(r => r.id === recordId);
+        return record ? {
+          id: record.id,
+          fields: record.fields
+        } : null;
+      }).filter(Boolean);
 
-      return (
-        <div className="space-y-4 bg-white rounded-lg overflow-hidden">
-          <h3 className="text-xl font-semibold px-4 pt-4">Web Search Results</h3>
-          <div className="space-y-4 px-4 pb-4">
-            {result.map((item: SearchResult, index: number) => (
-              <div key={index} className="border-b pb-4 last:border-0">
-                <a 
-                  href={item.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline font-medium"
-                >
-                  {item.title}
-                </a>
-                <p className="text-sm text-gray-600 mt-1">{item.content}</p>
-                <p className="text-xs text-gray-400 mt-1">
-                  Relevance score: {(item.score * 100).toFixed(1)}%
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    },
-  });
-
-  // Expose search results to copilot
-  useCopilotReadable({
-    description: "The current web search results from Tavily",
-    value: {
-      isSearching,
-    },
+      return {
+        records,
+        total: records.length
+      };
+    }
   });
 
   // Add chat suggestions based on dashboard state
@@ -1237,6 +1328,41 @@ export default function DashboardPage() {
     },
     [selectedRecords, selectedTable, searchTerm, filters]
   );
+
+  // Initialize columnOrder in useEffect when selectedTableFields changes
+  useEffect(() => {
+    if (selectedTableFields.length > 0) {
+      setColumnOrder(selectedTableFields.map(field => field.id));
+    }
+  }, [selectedTableFields]);
+
+  // Add drag event handlers
+  const handleDragStart = (event: DragStartEvent) => {
+    setIsDragging(true);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    setIsDragging(false);
+
+    if (over && active.id !== over.id) {
+      const oldIndex = columnOrder.indexOf(active.id as string);
+      const newIndex = columnOrder.indexOf(over.id as string);
+      
+      setColumnOrder(arrayMove(columnOrder, oldIndex, newIndex));
+    }
+  };
+
+  // Sort fields based on columnOrder
+  const orderedFields = useMemo(() => {
+    if (columnOrder.length === 0) return selectedTableFields;
+    
+    return [...selectedTableFields].sort((a, b) => {
+      const aIndex = columnOrder.indexOf(a.id);
+      const bIndex = columnOrder.indexOf(b.id);
+      return aIndex - bIndex;
+    });
+  }, [selectedTableFields, columnOrder]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -1409,148 +1535,166 @@ export default function DashboardPage() {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    <table className="w-full border-collapse">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="px-4 py-2 text-left">
-                            <input
-                              type="checkbox"
-                              checked={selectedRecords.length === paginatedData.length}
-                              onChange={(e) => {
-                                setSelectedRecords(
-                                  e.target.checked 
-                                    ? paginatedData.map(r => r.id)
-                                    : []
-                                );
-                              }}
-                              className="rounded border-gray-300"
-                            />
-                          </th>
-                          {selectedTableFields.map((field) => (
-                            <th key={field.id} className="px-4 py-2 text-left font-medium">
-                              <div className="flex items-center gap-2">
-                                <DropdownMenu>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <DropdownMenuTrigger asChild>
-                                          <Button variant="ghost" size="sm" className="-ml-3">
-                                            {field.name}
-                                            <ArrowUpDown className="ml-2 h-4 w-4" />
-                                          </Button>
-                                        </DropdownMenuTrigger>
-                                      </TooltipTrigger>
-                                      <TooltipContent side="bottom" className="max-w-sm whitespace-pre-wrap bg-white p-4 rounded-md shadow-lg border">
-                                        <div className="font-semibold mb-2">{field.name} ({field.type})</div>
-                                        <div className="text-sm text-gray-600">
-                                          {formatStatistics(fieldStatistics[field.name], field.type)}
-                                        </div>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
-                                  {renderFilterMenu(field)}
-                                </DropdownMenu>
-                              </div>
-                            </th>
-                          ))}
-                          <th className="px-4 py-2 text-left font-medium">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {paginatedData.map((record) => (
-                          <tr 
-                            key={record.id} 
-                            className={`border-b hover:bg-gray-50 cursor-pointer transition-colors ${
-                              selectedRecords.includes(record.id) ? 'bg-blue-50' : ''
-                            }`}
-                            onClick={(e) => {
-                              // Don't trigger row selection when clicking edit button or input
-                              if (
-                                e.target instanceof HTMLElement && 
-                                (e.target.closest('button') || e.target.closest('input'))
-                              ) {
-                                return;
-                              }
-                              setSelectedRecords(current => 
-                                current.includes(record.id)
-                                  ? current.filter(id => id !== record.id)
-                                  : [...current, record.id]
-                              );
-                            }}
-                          >
-                            <td className="px-4 py-2" onClick={e => e.stopPropagation()}>
+                    <DndContext
+                      sensors={sensors}
+                      onDragStart={handleDragStart}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <table className="w-full border-collapse table-fixed">
+                        <thead>
+                          <tr>
+                            <th className="w-[50px] px-4 py-2 text-left border-b border-r border-gray-200 bg-gray-50">
                               <input
                                 type="checkbox"
-                                checked={selectedRecords.includes(record.id)}
+                                checked={selectedRecords.length === paginatedData.length}
                                 onChange={(e) => {
-                                  setSelectedRecords(current => 
-                                    e.target.checked
-                                      ? [...current, record.id]
-                                      : current.filter(id => id !== record.id)
+                                  setSelectedRecords(
+                                    e.target.checked 
+                                      ? paginatedData.map(r => r.id)
+                                      : []
                                   );
                                 }}
                                 className="rounded border-gray-300"
                               />
-                            </td>
-                            {selectedTableFields.map((field) => (
-                              <td key={field.id} className="px-4 py-2">
-                                {editingCell?.recordId === record.id && 
-                                 editingCell?.fieldName === field.name ? (
-                                  <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
-                                    <Input
-                                      value={editingCell.value}
-                                      onChange={(e) => setEditingCell({
-                                        ...editingCell,
-                                        value: e.target.value,
-                                      })}
-                                      className="min-w-[200px]"
-                                      autoFocus
-                                    />
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={handleSaveEdit}
-                                      disabled={saving}
-                                    >
-                                      <Save className="h-4 w-4" />
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      onClick={handleCancelEdit}
-                                      disabled={saving}
-                                    >
-                                      <X className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2 group">
-                                    <span className="flex-1">
-                                      {record.fields[field.name]?.toString() || ''}
-                                    </span>
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="opacity-0 group-hover:opacity-100 transition-opacity"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleStartEdit(
-                                          record.id,
-                                          field.name,
-                                          record.fields[field.name]
-                                        );
-                                      }}
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
-                                  </div>
-                                )}
-                              </td>
-                            ))}
+                            </th>
+                            <SortableContext items={columnOrder}>
+                              {orderedFields.map((field) => (
+                                <SortableColumnHeader
+                                  key={field.id}
+                                  field={field}
+                                  onSort={() => handleSort(field.name)}
+                                  sortConfig={sortConfig}
+                                  renderFilterMenu={renderFilterMenu}
+                                  fieldStatistics={fieldStatistics[field.name]}
+                                  columnResizing={columnResizing}
+                                  onColumnResize={(fieldId, width) => {
+                                    setColumnResizing((prev) => ({
+                                      ...prev,
+                                      [fieldId]: { width },
+                                    }));
+                                  }}
+                                />
+                              ))}
+                            </SortableContext>
+                            <th className="w-[100px] px-4 py-2 text-left border-b border-gray-200 bg-gray-50">
+                              Actions
+                            </th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {paginatedData.map((record) => (
+                            <tr 
+                              key={record.id} 
+                              className={`border-b hover:bg-gray-50 cursor-pointer transition-colors ${
+                                selectedRecords.includes(record.id) ? 'bg-blue-50' : ''
+                              }`}
+                              onClick={(e) => {
+                                if (
+                                  e.target instanceof HTMLElement && 
+                                  (e.target.closest('button') || e.target.closest('input'))
+                                ) {
+                                  return;
+                                }
+                                setSelectedRecords(current => 
+                                  current.includes(record.id)
+                                    ? current.filter(id => id !== record.id)
+                                    : [...current, record.id]
+                                );
+                              }}
+                            >
+                              <td className="w-[50px] px-4 py-2 border-r border-gray-200" onClick={e => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedRecords.includes(record.id)}
+                                  onChange={(e) => {
+                                    setSelectedRecords(current => 
+                                      e.target.checked
+                                        ? [...current, record.id]
+                                        : current.filter(id => id !== record.id)
+                                    );
+                                  }}
+                                  className="rounded border-gray-300"
+                                />
+                              </td>
+                              {orderedFields.map((field) => (
+                                <td 
+                                  key={field.id} 
+                                  className="px-4 py-2 border-r border-gray-200 truncate relative"
+                                  style={{ width: `${columnResizing[field.id]?.width || 150}px` }}
+                                >
+                                  {editingCell?.recordId === record.id && 
+                                   editingCell?.fieldName === field.name ? (
+                                    <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                                      <Input
+                                        value={editingCell.value}
+                                        onChange={(e) => setEditingCell({
+                                          ...editingCell,
+                                          value: e.target.value,
+                                        })}
+                                        className="min-w-[200px]"
+                                        autoFocus
+                                      />
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={handleSaveEdit}
+                                        disabled={saving}
+                                      >
+                                        <Save className="h-4 w-4" />
+                                      </Button>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        onClick={handleCancelEdit}
+                                        disabled={saving}
+                                      >
+                                        <X className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-2 group">
+                                      <TooltipProvider>
+                                        <Tooltip>
+                                          <TooltipTrigger asChild>
+                                            <span className="flex-1 truncate cursor-default">
+                                              {record.fields[field.name]?.toString() || ''}
+                                            </span>
+                                          </TooltipTrigger>
+                                          <TooltipContent 
+                                            side="top" 
+                                            className="max-w-sm break-words bg-white p-2 text-sm"
+                                          >
+                                            {record.fields[field.name]?.toString() || ''}
+                                          </TooltipContent>
+                                        </Tooltip>
+                                      </TooltipProvider>
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          handleStartEdit(
+                                            record.id,
+                                            field.name,
+                                            record.fields[field.name]
+                                          );
+                                        }}
+                                      >
+                                        <Pencil className="h-4 w-4" />
+                                      </Button>
+                                    </div>
+                                  )}
+                                </td>
+                              ))}
+                              <td className="w-[100px] px-4 py-2">
+                                {/* Actions */}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </DndContext>
                   </div>
                   
                   {/* Pagination */}
