@@ -390,7 +390,7 @@ function SortableColumnHeader({
     const handleMouseMove = (e: MouseEvent) => {
       if (!isResizing) return;
       e.preventDefault();
-      const newWidth = Math.max(50, startWidth + (e.pageX - startX));
+      const newWidth = Math.max(100, startWidth + (e.pageX - startX));
       onColumnResize(field.id, newWidth);
     };
 
@@ -445,10 +445,10 @@ function SortableColumnHeader({
       </div>
       <div
         onMouseDown={handleResizeStart}
-        className={`absolute right-0 top-0 bottom-0 w-3 cursor-col-resize hover:bg-blue-400 hover:opacity-100 transition-colors ${
+        className={`absolute right-0 top-0 bottom-0 w-2 cursor-col-resize hover:bg-blue-400 hover:opacity-100 transition-colors ${
           isResizing ? 'bg-blue-400' : 'bg-transparent'
         }`}
-        style={{ cursor: 'col-resize' }}
+        style={{ cursor: 'col-resize', zIndex: 10 }}
       />
     </th>
   );
@@ -507,6 +507,9 @@ export default function DashboardPage() {
       },
     })
   );
+
+  // Add new state for row heights
+  const [rowHeights, setRowHeights] = useState<{ [key: string]: number }>({});
 
   // Initialize state from localStorage
   useEffect(() => {
@@ -1364,6 +1367,33 @@ export default function DashboardPage() {
     });
   }, [selectedTableFields, columnOrder]);
 
+  const handleRowResizeStart = (recordId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const startY = e.pageY;
+    const startHeight = rowHeights[recordId] || 40; // Default height
+    
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      const newHeight = Math.max(40, startHeight + (e.pageY - startY));
+      setRowHeights(prev => ({
+        ...prev,
+        [recordId]: newHeight
+      }));
+    };
+    
+    const handleMouseUp = () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'default';
+    };
+    
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.body.style.cursor = 'row-resize';
+  };
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -1588,6 +1618,7 @@ export default function DashboardPage() {
                               className={`border-b hover:bg-gray-50 cursor-pointer transition-colors ${
                                 selectedRecords.includes(record.id) ? 'bg-blue-50' : ''
                               }`}
+                              style={{ height: `${rowHeights[record.id] || 40}px` }}
                               onClick={(e) => {
                                 if (
                                   e.target instanceof HTMLElement && 
@@ -1687,8 +1718,13 @@ export default function DashboardPage() {
                                   )}
                                 </td>
                               ))}
-                              <td className="w-[100px] px-4 py-2">
+                              <td className="w-[100px] px-4 py-2 relative">
                                 {/* Actions */}
+                                <div
+                                  className="absolute bottom-0 left-[-1000px] right-[-1000px] h-2 cursor-row-resize hover:bg-blue-400 hover:opacity-100 transition-colors"
+                                  onMouseDown={(e) => handleRowResizeStart(record.id, e)}
+                                  style={{ zIndex: 10 }}
+                                />
                               </td>
                             </tr>
                           ))}
